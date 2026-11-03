@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WCC Engineering Inventory</title>
+<style>
+/* Theme: edit these to match WCC's official palette */
+:root{--navy:#0a2c52;--blue:#1d6fb8;--gold:#f2b705;--gold-soft:#ffe27a;--bg:#f3f5f8;--card:#fff;--ink:#1b2430;--mut:#667385;--line:#d6dde6;--bad:#c0392b;--ok:#23824f}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1520;--card:#172230;--ink:#e7edf4;--mut:#93a1b2;--line:#2a3a4c;--ok:#4cc58a;--bad:#ff7b6b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+header{background:var(--navy);border-bottom:5px solid var(--gold);color:#fff;padding:14px 20px 0}
+header h1{margin:0;font:700 26px/1.1 Georgia,"Times New Roman",serif;letter-spacing:.3px}
+header p{margin:2px 0 10px;color:#b9c9dd;font-size:13px}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;color:#cfdced;padding:9px 16px;font:inherit;cursor:pointer;border-radius:6px 6px 0 0}
+nav button.on{background:var(--bg);color:var(--navy);font-weight:600}
+@media(prefers-color-scheme:dark){nav button.on{color:var(--gold)}}
+main{max-width:1100px;margin:18px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+h2{margin:0 0 6px;font:700 20px Georgia,serif}h3{margin:14px 0 6px}
+.mut{color:var(--mut);font-size:13px}.ok{color:var(--ok);font-weight:600}.low{color:var(--bad);font-weight:700}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;padding:6px 11px}
+button:hover{border-color:var(--blue)}
+button.pri{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+button.gold{background:var(--gold);border-color:var(--gold);color:#1a1a1a;font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:1px}
+input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%}
+.bar{display:flex;gap:10px;margin-bottom:12px}.bar input{flex:1}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;color:var(--mut);font-weight:600}
+.act{white-space:nowrap}.act button{margin-right:4px;padding:4px 8px;font-size:13px}
+.bin{display:inline-block;background:var(--navy);color:#fff;border-radius:5px;padding:2px 8px;font-weight:600;cursor:help;border-bottom:3px solid var(--gold)}
+#pop{position:fixed;z-index:50;background:var(--card);border:2px solid var(--navy);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none}
+/* bin map */
+.map{display:flex;gap:14px;align-items:flex-start;overflow-x:auto;padding:4px 0}
+.blk{display:grid;gap:2px}
+.cell{border:1px solid #222;background:var(--gold-soft);color:#222;font-size:8px;text-align:center;min-width:26px;min-height:20px;display:flex;flex-direction:column;justify-content:center}
+.cell i{display:grid;grid-template-columns:1fr 1fr;font-style:normal}
+.cell i b{font-weight:400;font-size:6px;border:1px solid rgba(0,0,0,.35)}
+.cell.hl{background:var(--blue);color:#fff;outline:3px solid var(--navy);outline-offset:1px;font-weight:700;position:relative;z-index:1}
+.cell i b.hq{background:var(--gold);color:#000;font-weight:700}
+.big .cell{min-width:54px;min-height:42px;font-size:13px}.big .cell i b{font-size:9px}
+.edit .cell{cursor:pointer}.edit .cell:hover{outline:2px solid var(--blue)}.edit .cell.sub{background:#ffc94d}
+.row2{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.row2 input{width:70px}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);padding:18px;width:min(420px,92vw)}
+dialog::backdrop{background:rgba(5,15,30,.55)}dialog h3{margin-top:0}
+label{display:block;margin:8px 0;font-size:13px;color:var(--mut)}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.cnt{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin:6px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>WCC Engineering</h1>
+  <p>Electronics component inventory</p>
+  <nav id="nav"></nav>
+</header>
+<main id="app"></main>
+<div id="pop" hidden></div>
+<dialog id="dlg"></dialog>
+
+<script>
+const DEF={items:[],log:[],layout:{blocks:[{p:'L',r:7,c:3},{p:'C',r:5,c:7},{p:'R',r:7,c:3}],sub:['L13']}};
+let S=structuredClone(DEF),view='inv',q='',tech={bin:null,msg:''},user=null,authReady=false,cfgOK=true;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function save(){if(window.cloud)cloud.save()}
+const bins=()=>S.layout.blocks.flatMap(b=>Array.from({length:b.r},(_,i)=>Array.from({length:b.c},(_,j)=>b.p+(i+1)+(j+1)))).flat();
+const loc=i=>i.bin+(i.quad?'-'+i.quad:'');
+const QUADS=['NW','NE','SW','SE'];
+function addLog(type,item,detail){S.log.unshift({t:Date.now(),type,item,detail});S.log=S.log.slice(0,500)}
+
+/* ---------- bin map ---------- */
+function map(hl,q,edit){
+  return '<div class="map'+(edit?' edit':'')+'">'+S.layout.blocks.map(b=>{
+    let h='<div class="blk" style="grid-template-columns:repeat('+b.c+',1fr)">';
+    for(let i=1;i<=b.r;i++)for(let j=1;j<=b.c;j++){
+      const id=b.p+i+j,sub=S.layout.sub.includes(id);
+      h+=`<div class="cell${id===hl?' hl':''}${sub?' sub':''}"${edit?` data-cell="${id}"`:''} title="${id}${sub?' (subdivided)':''}"><span>${id}</span>`+
+        (sub?'<i>'+QUADS.map(x=>`<b class="${id===hl&&x===q?'hq':''}">${x}</b>`).join('')+'</i>':'')+'</div>';
+    }
+    return h+'</div>';
+  }).join('')+'</div>';
+}
+
+/* ---------- hover popup ---------- */
+const pop=$('#pop');
+document.addEventListener('mouseover',e=>{
+  const t=e.target.closest('[data-bin]');
+  if(!t){pop.hidden=true;return}
+  const b=t.dataset.bin,qd=t.dataset.q||'';
+  pop.innerHTML=b==='NO-BIN'?'<b>NO-BIN</b><div class="mut">No bin assigned yet</div>':'<b>Bin '+esc(b)+(qd?', '+qd+' quadrant':'')+'</b>'+map(b,qd,0);
+  pop.hidden=false;
+  const r=t.getBoundingClientRect(),w=pop.offsetWidth,h=pop.offsetHeight;
+  let y=r.bottom+6;if(y+h>innerHeight)y=r.top-h-6;
+  pop.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+'px';pop.style.top=Math.max(8,y)+'px';
+});
+
+/* ---------- dialog helper ---------- */
+const d=$('#dlg');
+function dlg(title,body,ok,fn){
+  d.innerHTML=`<form><h3>${title}</h3>${body}<div class="row"><button type="button" onclick="d.close()">Cancel</button><button class="pri">${ok}</button></div></form>`;
+  d.querySelector('form').onsubmit=e=>{e.preventDefault();fn(new FormData(e.target));d.close()};
+  d.showModal();
+}
+const binOpts=sel=>['NO-BIN',...bins()].map(b=>`<option${b===sel?' selected':''}>${b}</option>`).join('');
+const quadOpts=sel=>[['','Whole bin']].concat(QUADS.map(x=>[x,x])).map(([v,l])=>`<option value="${v}"${v===sel?' selected':''}>${l}</option>`).join('');
+
+/* ---------- inventory actions ---------- */
+function itemForm(id){
+  const it=S.items.find(i=>i.id===id)||{name:'',desc:'',bin:'NO-BIN',quad:'',qty:0,min:0};
+  dlg(id?'Edit item':'Add item',
+    `<label>Name / part number<input name="name" required value="${esc(it.name)}"></label>
+     <label>Description<input name="desc" value="${esc(it.desc)}"></label>
+     <label>Bin<select name="bin">${binOpts(it.bin)}</select></label>
+     <label>Quadrant (for subdivided bins)<select name="quad">${quadOpts(it.quad)}</select></label>
+     <label>Quantity<input name="qty" type="number" min="0" required value="${it.qty}"></label>
+     <label>Low-stock warning at<input name="min" type="number" min="0" value="${it.min}"></label>`+
+     (id?`<button type="button" style="margin-top:8px;color:var(--bad)" onclick="delItem('${id}')">Delete item</button>`:''),
+    id?'Save changes':'Add item',fd=>{
+      const o={name:fd.get('name').trim(),desc:fd.get('desc').trim(),bin:fd.get('bin'),quad:fd.get('quad'),qty:Math.max(0,+fd.get('qty')||0),min:Math.max(0,+fd.get('min')||0)};
+      if(o.bin==='NO-BIN')o.quad='';
+      if(id){Object.assign(it,o);addLog('edit',o.name,'Updated details')}
+      else{S.items.push({id:String(Date.now()),last:null,...o});addLog('add',o.name,'Added with qty '+o.qty+' in '+(o.bin+(o.quad?'-'+o.quad:'')))}
+      save();render();
+    });
+}
+const edit=itemForm;
+function delItem(id){const it=S.items.find(i=>i.id===id);if(!confirm('Delete '+it.name+'?'))return;S.items=S.items.filter(i=>i.id!==id);addLog('delete',it.name,'Removed');save();d.close();render()}
+function checkout(id){
+  const it=S.items.find(i=>i.id===id);
+  if(!it.qty){alert(it.name+' is out of stock.');return}
+  dlg('Check out '+esc(it.name),`<p class="mut">${it.qty} available in ${esc(loc(it))}</p>
+    <label>Taken by<input name="who" required></label>
+    <label>Quantity<input name="n" type="number" min="1" max="${it.qty}" value="1" required></label>`,'Check out',fd=>{
+      const n=Math.min(it.qty,Math.max(1,+fd.get('n')||1));
+      it.qty-=n;addLog('checkout',it.name,n+' taken by '+fd.get('who').trim()+' (left: '+it.qty+')');save();render();
+    });
+}
+function applyCount(it,n,who){
+  const diff=n-it.qty;it.qty=n;it.last=Date.now();
+  addLog('recount',it.name,(who||'Recount')+': counted '+n+(diff?' ('+(diff>0?'+':'')+diff+' vs. recorded)':' (matches)'));
+}
+function recount(id){
+  const it=S.items.find(i=>i.id===id);
+  dlg('Recount '+esc(it.name),`<p class="mut">Location: ${esc(loc(it))}</p><label>Counted quantity<input name="n" type="number" min="0" required autofocus></label>`,'Save count',fd=>{applyCount(it,Math.max(0,+fd.get('n')||0));save();render()});
+}
+
+/* ---------- views ---------- */
+function tbl(){
+  const k=q.toLowerCase();
+  const L=S.items.filter(i=>(i.name+' '+i.desc+' '+loc(i)).toLowerCase().includes(k)).sort((a,b)=>a.name.localeCompare(b.name));
+  if(!L.length)return '<p class="mut">'+(S.items.length?'No items match your search.':'No items yet. Use “Add item” to enter your first component.')+'</p>';
+  return '<div class="tw"><table><tr><th>Component</th><th>Bin</th><th>Qty</th><th>Last counted</th><th></th></tr>'+L.map(i=>
+    `<tr><td><b>${esc(i.name)}</b><div class="mut">${esc(i.desc)}</div></td>
+     <td><span class="bin" data-bin="${esc(i.bin)}" data-q="${i.quad}">${esc(loc(i))}</span></td>
+     <td class="${i.min>0&&i.qty<=i.min?'low':''}">${i.qty}</td>
+     <td class="mut">${i.last?new Date(i.last).toLocaleDateString():'never'}</td>
+     <td class="act"><button onclick="checkout('${i.id}')">Check out</button><button onclick="recount('${i.id}')">Recount</button><button onclick="edit('${i.id}')">Edit</button></td></tr>`).join('')+'</table></div>';
+}
+function vInv(){
+  return `<div class="card"><div class="bar"><input type="search" placeholder="Search by name, description, or bin" value="${esc(q)}" oninput="q=this.value;$('#tbl').innerHTML=tbl()"><button class="gold" onclick="itemForm()">Add item</button></div><div id="tbl">${tbl()}</div></div>`;
+}
+function pick(){
+  const occ=[...new Set(S.items.filter(i=>i.bin!=='NO-BIN').map(i=>i.bin))].filter(b=>b!==tech.bin);
+  if(!occ.length){tech.msg='Add items with bin numbers first (or this is the only occupied bin).';if(!tech.bin){render();return}}
+  else{tech.bin=occ[Math.floor(Math.random()*occ.length)];tech.msg=''}
+  render();
+}
+function vLab(){
+  const occ=new Set(S.items.filter(i=>i.bin!=='NO-BIN').map(i=>i.bin)).size;
+  let h=`<div class="card"><h2>Lab Tech</h2><p class="mut">${occ} occupied bin${occ===1?'':'s'}, ${S.items.length} item${S.items.length===1?'':'s'} tracked.</p>
+    <button class="pri" onclick="pick()">${tech.bin?'Skip, pick another bin':'Send me to a random bin'}</button>`;
+  if(tech.msg)h+=`<p class="ok">${esc(tech.msg)}</p>`;
+  if(tech.bin){
+    const its=S.items.filter(i=>i.bin===tech.bin);
+    h+=`<h3>Go to bin <span class="bin" data-bin="${tech.bin}">${tech.bin}</span></h3><div class="big">${map(tech.bin,'',0)}</div>
+      <h3>Count what is physically in the bin</h3><form onsubmit="return submitLab(event)">`+
+      its.map(i=>`<div class="cnt"><div><b>${esc(i.name)}</b> <span class="mut">${esc(loc(i))}</span></div><input name="c${i.id}" type="number" min="0" placeholder="Count"></div>`).join('')+
+      `<div class="row"><button class="gold">Save recount</button></div></form><p class="mut">Leave a field blank to skip that item.</p>`;
+  }
+  return h+'</div>';
+}
+function submitLab(e){
+  e.preventDefault();const fd=new FormData(e.target);let n=0;
+  S.items.filter(i=>i.bin===tech.bin).forEach(i=>{const v=fd.get('c'+i.id);if(v!==''&&v!==null){applyCount(i,Math.max(0,+v),'Lab tech recount');n++}});
+  tech={bin:null,msg:n?'Saved '+n+' count'+(n>1?'s':'')+'. Ready for another bin.':'Nothing entered, so no counts were saved.'};
+  save();render();return false;
+}
+function vLay(){
+  return `<div class="card"><h2>Bin layout</h2><p class="mut">Bins are named section + row + column (L13 = section L, row 1, column 3). Click a bin below to turn quadrants (NW, NE, SW, SE) on or off.</p>`+
+    S.layout.blocks.map((b,i)=>`<div class="row2"><b>Section ${esc(b.p)}</b> Rows <input type="number" min="1" max="20" value="${b.r}" onchange="dim(${i},'r',this.value)"> Columns <input type="number" min="1" max="9" value="${b.c}" onchange="dim(${i},'c',this.value)"><button onclick="delBlock(${i})">Remove</button></div>`).join('')+
+    `<div class="row2">New section letter(s) <input id="np" maxlength="2" style="width:60px"><button onclick="addBlock()">Add section</button></div>
+     <div class="big">${map('','',1)}</div></div>`;
+}
+function relayout(fn){
+  const old=JSON.stringify(S.layout);fn();
+  const ok=bins(),orph=S.items.filter(i=>i.bin!=='NO-BIN'&&!ok.includes(i.bin));
+  if(orph.length&&!confirm(orph.length+' item(s) sit in bins that will no longer exist. They will move to NO-BIN. Continue?')){S.layout=JSON.parse(old);render();return}
+  orph.forEach(i=>{i.bin='NO-BIN';i.quad=''});
+  S.layout.sub=S.layout.sub.filter(b=>ok.includes(b));save();render();
+}
+const dim=(i,k,v)=>relayout(()=>{S.layout.blocks[i][k]=Math.max(1,Math.min(k==='r'?20:9,+v||1))});
+const delBlock=i=>relayout(()=>S.layout.blocks.splice(i,1));
+function addBlock(){
+  const p=$('#np').value.toUpperCase().replace(/[^A-Z]/g,'');
+  if(!p||S.layout.blocks.some(b=>b.p===p)){alert('Enter a letter code that is not already used by another section.');return}
+  S.layout.blocks.push({p,r:3,c:3});save();render();
+}
+document.addEventListener('click',e=>{
+  const c=e.target.closest('[data-cell]');if(!c)return;
+  const id=c.dataset.cell,s=S.layout.sub,i=s.indexOf(id);
+  if(i<0)s.push(id);else{s.splice(i,1);S.items.filter(x=>x.bin===id).forEach(x=>x.quad='')}
+  save();render();
+});
+function vLog(){
+  return `<div class="card"><h2>Activity log</h2>`+(S.log.length?'<div class="tw"><table><tr><th>When</th><th>Action</th><th>Item</th><th>Details</th></tr>'+S.log.slice(0,100).map(l=>`<tr><td class="mut">${new Date(l.t).toLocaleString()}</td><td>${esc(l.type)}</td><td>${esc(l.item)}</td><td>${esc(l.detail)}</td></tr>`).join('')+'</table></div>':'<p class="mut">Nothing logged yet.</p>')+
+  `</div><div class="card"><h2>Back up and restore</h2><p class="mut">Data syncs to the shared cloud database. Export a backup now and then for safekeeping. Importing replaces everything in the database.</p>
+   <button onclick="exportData()">Export JSON</button> <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this.files[0])"><button onclick="$('#imp').click()">Import JSON</button></div>`+`<div class="card"><h2>CSV backup</h2><p class="mut">Export the item list to a spreadsheet-friendly file, or load items from a CSV.</p><button onclick="exportCSV()">Export CSV</button> <input type="file" id="impcsv" accept=".csv,text/csv" style="display:none" onchange="importCSV(this.files[0]);this.value=''"><button onclick="$('#impcsv').click()">Import CSV</button></div>`;
+}
+function exportData(){
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));
+  a.download='wcc-inventory-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+}
+function importData(f){
+  if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{const s=JSON.parse(r.result);if(!Array.isArray(s.items)||!s.layout||!Array.isArray(s.layout.blocks))throw 0;
+    if(!confirm('Replace all current data with this file?'))return;S={log:[],...s};save();render()}catch(e){alert('That file is not a valid WCC inventory backup.')}};
+  r.readAsText(f);
+}
+
+/* ---------- CSV backup ---------- */
+const CSV_COLS=['name','description','bin','quadrant','quantity','min_stock','last_counted'];
+const csvCell=v=>{v=String(v??'');return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+function exportCSV(){
+  const rows=[CSV_COLS.join(',')].concat(S.items.map(i=>[i.name,i.desc,i.bin,i.quad,i.qty,i.min,i.last?new Date(i.last).toISOString().slice(0,10):''].map(csvCell).join(',')));
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv'}));
+  a.download='wcc-inventory-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+function parseCSV(t){
+  const rows=[];let r=[],c='',q=false;t=t.replace(/^\ufeff/,'');
+  for(let i=0;i<t.length;i++){const ch=t[i];
+    if(q){if(ch=='"'){if(t[i+1]=='"'){c+='"';i++}else q=false}else c+=ch}
+    else if(ch=='"')q=true;
+    else if(ch==','){r.push(c);c=''}
+    else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);c='';rows.push(r);r=[]}
+    else c+=ch}
+  if(c||r.length){r.push(c);rows.push(r)}
+  return rows.filter(r=>r.some(x=>x.trim()));
+}
+function importCSV(f){
+  if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{
+    const rows=parseCSV(rd.result),h=(rows.shift()||[]).map(x=>x.trim().toLowerCase()),ix=n=>h.indexOf(n);
+    if(ix('name')<0){alert('The first row must be a header row that includes a "name" column.');return}
+    const ok=bins(),warn=[],items=[];
+    rows.forEach((row,n)=>{
+      const g=k=>ix(k)<0?'':(row[ix(k)]||'').trim();
+      const name=g('name');if(!name){warn.push('Row '+(n+2)+': no name, skipped');return}
+      let bin=g('bin').toUpperCase()||'NO-BIN',quad=g('quadrant').toUpperCase();
+      if(bin!=='NO-BIN'&&!ok.includes(bin)){warn.push('Row '+(n+2)+': bin '+bin+' is not in the layout, set to NO-BIN');bin='NO-BIN'}
+      if(bin==='NO-BIN'||!QUADS.includes(quad))quad='';
+      const num=k=>{const v=parseInt(g(k),10);return v>=0?v:0},t=Date.parse(g('last_counted'));
+      items.push({name,desc:g('description'),bin,quad,qty:num('quantity'),min:num('min_stock'),last:isNaN(t)?null:t});
+    });
+    dlg('Import CSV',`<p>${items.length} item(s) found.</p>`+(warn.length?`<div class="mut" style="max-height:110px;overflow:auto;margin-bottom:8px">${warn.slice(0,20).map(esc).join('<br>')}${warn.length>20?'<br>and '+(warn.length-20)+' more':''}</div>`:'')+
+      `<label><input type="radio" name="mode" value="merge" checked style="width:auto"> Add new items and update existing ones (matched by name, bin and quadrant)</label>
+       <label><input type="radio" name="mode" value="replace" style="width:auto"> Replace the entire inventory with this file</label>`,'Import',fd=>{
+      const stamp=Date.now();
+      if(fd.get('mode')==='replace')S.items=items.map((o,i)=>({id:String(stamp+i),...o}));
+      else items.forEach((o,i)=>{
+        const m=S.items.find(x=>x.name.toLowerCase()===o.name.toLowerCase()&&x.bin===o.bin&&x.quad===o.quad);
+        if(m)Object.assign(m,o,o.last===null?{last:m.last}:{});else S.items.push({id:String(stamp+i),...o});
+      });
+      addLog('import','CSV',items.length+' row(s), mode: '+fd.get('mode'));save();render();
+    });
+  };
+  rd.readAsText(f);
+}
+
+/* ---------- shell ---------- */
+const TABS=[['inv','Inventory',vInv],['lab','Lab Tech',vLab],['lay','Bin Layout',vLay],['log','Log & Backup',vLog]];
+function vLogin(){return `<div class="card" style="max-width:380px;margin:30px auto"><h2>Sign in</h2><p class="mut">Use the shared lab account.</p><form onsubmit="return cloud.login(event)"><label>Email<input name="email" type="email" required autocomplete="username"></label><label>Password<input name="pw" type="password" required autocomplete="current-password"></label><div class="row"><button class="pri">Sign in</button></div></form></div>`}
+function vSetup(){return '<div class="card"><h2>Database not connected</h2><p>Open <b>index.html</b>, find <b>firebaseConfig</b> near the bottom, and paste in your Firebase project values.</p></div>'}
+function render(){
+  pop.hidden=true;
+  $('#nav').innerHTML=user&&cfgOK?TABS.map(t=>`<button class="${t[0]===view?'on':''}" onclick="view='${t[0]}';render()">${t[1]}</button>`).join('')+'<button onclick="cloud.logout()" style="margin-left:auto">Sign out</button>':'';
+  $('#app').innerHTML=!cfgOK?vSetup():!authReady?'<p class="mut">Loading…</p>':!user?vLogin():TABS.find(t=>t[0]===view)[2]();
+}
+render();
+</script>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getFirestore,collection,doc,setDoc,deleteDoc,addDoc,onSnapshot,query,orderBy,limit} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCjbZq-TW9N-ogt9du6MvtJmCD7rVN9w2o",
+  authDomain: "electronics-inventory-26b01.firebaseapp.com",
+  projectId: "electronics-inventory-26b01",
+  storageBucket: "electronics-inventory-26b01.firebasestorage.app",
+  messagingSenderId: "680448653231",
+  appId: "1:680448653231:web:f4c333812984ef9c69215a"
+};
+
+if(firebaseConfig.apiKey.startsWith('PASTE')){cfgOK=false;render()}
+else{
+  const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+  const cache={items:{},layout:''};let unsubs=[];
+  const refresh=()=>{const a=document.activeElement;if(a&&a.tagName==='INPUT'&&$('#app').contains(a))return;render()};
+  window.cloud={
+    // Writes only what changed: items one document each, the layout, and new log entries
+    save(){
+      const cur={};S.items.forEach(i=>cur[i.id]=JSON.stringify(i));
+      for(const id in cur)if(cur[id]!==cache.items[id])setDoc(doc(db,'items',id),JSON.parse(cur[id])).catch(fail);
+      for(const id in cache.items)if(!(id in cur))deleteDoc(doc(db,'items',id)).catch(fail);
+      const lj=JSON.stringify(S.layout);
+      if(lj!==cache.layout)setDoc(doc(db,'config','layout'),S.layout).catch(fail);
+      S.log.filter(l=>!l.sent).forEach(l=>{l.sent=1;addDoc(collection(db,'log'),{t:l.t,type:l.type,item:l.item,detail:l.detail}).catch(fail)});
+      cache.items=cur;cache.layout=lj;
+    },
+    login(e){e.preventDefault();const f=new FormData(e.target);signInWithEmailAndPassword(auth,f.get('email'),f.get('pw')).catch(()=>alert('Sign-in failed. Check the email and password.'));return false},
+    logout(){signOut(auth)}
+  };
+  const fail=e=>alert('Database error: '+e.message);
+  function listen(){
+    unsubs.push(onSnapshot(collection(db,'items'),s=>{S.items=s.docs.map(x=>x.data());cache.items={};S.items.forEach(i=>cache.items[i.id]=JSON.stringify(i));refresh()},fail));
+    unsubs.push(onSnapshot(doc(db,'config','layout'),s=>{if(s.exists()){S.layout=s.data();cache.layout=JSON.stringify(S.layout);refresh()}else setDoc(doc(db,'config','layout'),S.layout).catch(fail)},fail));
+    unsubs.push(onSnapshot(query(collection(db,'log'),orderBy('t','desc'),limit(100)),s=>{S.log=s.docs.map(x=>({...x.data(),sent:1}));refresh()},fail));
+  }
+  onAuthStateChanged(auth,u=>{user=u;authReady=true;unsubs.forEach(f=>f());unsubs=[];if(u)listen();else S=structuredClone(DEF);render()});
+}
+</script>
+</body>
+</html>
